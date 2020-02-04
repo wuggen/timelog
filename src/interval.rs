@@ -144,6 +144,11 @@ impl TaggedInterval {
     pub fn duration(&self) -> Option<Duration> {
         self.interval.duration()
     }
+
+    pub fn round_to_quarter_hours(&self) -> TaggedInterval {
+        let interval = self.interval.round_to_quarter_hours();
+        TaggedInterval { interval, ..*self }
+    }
 }
 
 pub fn tag(tag: TagId, interval: Interval) -> TaggedInterval {

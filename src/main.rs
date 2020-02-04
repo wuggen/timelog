@@ -1,13 +1,44 @@
-use serde_json;
+use timelog::config::{self, Options, ConfigError};
+use timelog::commands::CommandError;
+
 use structopt::StructOpt;
 
-#[derive(Debug, Clone, StructOpt)]
-struct Options {
-    num: Option<i32>,
+use std::error::Error;
+use std::fmt::{self, Formatter, Display};
+
+fn main() -> Result<(), MainError> {
+    let options = Options::from_args();
+    let mut timelog = config::current_timelog(&options)?;
+    options.command.execute(&mut timelog)?;
+    config::write_timelog(&options, &timelog)?;
+    Ok(())
 }
 
-fn main() -> serde_json::Result<()> {
-    let Options { num } = Options::from_args();
-    println!("{}", serde_json::to_string(&num)?);
-    Ok(())
+#[derive(Debug)]
+enum MainError {
+    ConfigError(ConfigError),
+    CommandError(CommandError),
+}
+
+impl Display for MainError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            MainError::ConfigError(err) => write!(f, "{}", err),
+            MainError::CommandError(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl Error for MainError {}
+
+impl From<ConfigError> for MainError {
+    fn from(err: ConfigError) -> MainError {
+        MainError::ConfigError(err)
+    }
+}
+
+impl From<CommandError> for MainError {
+    fn from(err: CommandError) -> MainError {
+        MainError::CommandError(err)
+    }
 }
