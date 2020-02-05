@@ -1,9 +1,13 @@
 use crate::tags::TagId;
 
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Duration, Local, TimeZone, Timelike, Utc};
 
 use std::ops::Add;
 use std::time::Duration as StdDuration;
+
+use std::fmt::{self, Display, Formatter};
+
+pub static FMT_STR: &str = "%a %F %I:%M%P";
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Interval {
@@ -83,6 +87,36 @@ impl Interval {
 
     pub fn duration(&self) -> Option<Duration> {
         self.duration.map(|d| Duration::from_std(d).unwrap())
+    }
+}
+
+impl Display for Interval {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let start = Local.from_utc_datetime(&self.start.naive_utc());
+
+        fn fmt_duration(dur: Duration) -> String {
+            format!("{}:{:02}", dur.num_hours(), dur.num_minutes() % 60)
+        }
+
+        match self.end() {
+            Some(end) => {
+                let end = Local.from_utc_datetime(&end.naive_utc());
+                write!(
+                    f,
+                    "{} -- {} ({})",
+                    start.format(FMT_STR),
+                    end.format(FMT_STR),
+                    fmt_duration(self.duration().unwrap()),
+                )
+            }
+
+            None => write!(
+                f,
+                "{} -- OPEN ({})",
+                start.format(FMT_STR),
+                fmt_duration(ceil_time(&Utc::now()).signed_duration_since(self.start())),
+            ),
+        }
     }
 }
 
@@ -200,6 +234,8 @@ impl QuarterHour {
             .unwrap()
             .with_second(0)
             .unwrap()
+            .with_nanosecond(0)
+            .unwrap()
     }
 
     fn ceil<T>(time: &T) -> <T as Add<Duration>>::Output
@@ -213,5 +249,22 @@ impl QuarterHour {
             .unwrap()
             .with_second(0)
             .unwrap()
+            .with_nanosecond(0)
+            .unwrap()
     }
+}
+
+pub fn floor_time<T>(time: &T) -> T
+where
+    T: Timelike,
+{
+    QuarterHour::floor(time)
+}
+
+pub fn ceil_time<T>(time: &T) -> <T as Add<Duration>>::Output
+where
+    T: Timelike + Add<Duration> + Clone,
+    <T as Add<Duration>>::Output: Timelike,
+{
+    QuarterHour::ceil(time)
 }

@@ -1,3 +1,4 @@
+use crate::interval;
 use crate::timelog::{TimeLog, TimeLogError};
 
 use chrono::{Local, TimeZone};
@@ -8,10 +9,13 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Clone, StructOpt)]
 pub enum Command {
+    /// Open a new interval for the given tag, or the tag 'default'.
     Open { tag: Option<String> },
 
+    /// Close the currently open interval for the given tag, or the tag 'default'.
     Close { tag: Option<String> },
 
+    /// List all logged intervals for all tags.
     List,
 }
 
@@ -38,7 +42,11 @@ fn open(tag: &str, timelog: &mut TimeLog) -> Result<(), CommandError> {
     match timelog.open(tag) {
         Ok(int) => {
             let start = Local.from_utc_datetime(&int.start().naive_utc());
-            println!("Opened new interval for tag '{}' at {}", tag, start);
+            println!(
+                "Opened new interval for tag '{}' at {}",
+                tag,
+                start.format(interval::FMT_STR)
+            );
             Ok(())
         }
         Err(err) => {
@@ -51,9 +59,7 @@ fn open(tag: &str, timelog: &mut TimeLog) -> Result<(), CommandError> {
 fn close(tag: &str, timelog: &mut TimeLog) -> Result<(), CommandError> {
     match timelog.close(tag) {
         Ok(int) => {
-            let start = Local.from_utc_datetime(&int.start().naive_utc());
-            let end = Local.from_utc_datetime(&int.end().unwrap().naive_utc());
-            println!("Closed interval for tag '{}': {} -- {}", tag, start, end);
+            println!("Closed interval for tag '{}': {}", tag, int.interval());
             Ok(())
         }
         Err(err) => {
@@ -66,15 +72,7 @@ fn close(tag: &str, timelog: &mut TimeLog) -> Result<(), CommandError> {
 fn list(timelog: &TimeLog) {
     for int in timelog.iter() {
         let tag = timelog.tag_name(int.tag()).unwrap();
-        let start = Local
-            .from_utc_datetime(&int.start().naive_utc())
-            .to_string();
-        let end = int
-            .end()
-            .map(|d| Local.from_utc_datetime(&d.naive_utc()).to_string())
-            .unwrap_or_else(|| "OPEN".into());
-
-        println!("{}: {} -- {}", tag, start, end);
+        println!("{}: {}", tag, int.interval());
     }
 }
 

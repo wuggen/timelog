@@ -1,6 +1,8 @@
 use crate::filter::{self, Filter};
-use crate::interval::TaggedInterval;
-use crate::tags::{Tags, TagId};
+use crate::interval::{self, TaggedInterval};
+use crate::tags::{TagId, Tags};
+
+use chrono::Utc;
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -33,38 +35,34 @@ impl TimeLog {
         self.intervals.iter_mut()
     }
 
-    pub fn filter<'a>(&'a self, filter: Filter<'a>) -> impl Iterator<Item = &TaggedInterval> + 'a {
-        self.intervals.iter().filter(move |int| filter.apply(int))
+    pub fn filter(&self, filter: Filter) -> impl Iterator<Item = &TaggedInterval> {
+        self.intervals.iter().filter(filter.closure_ref())
     }
 
-    pub fn filter_mut<'a>(
-        &'a mut self,
-        filter: Filter<'a>,
-    ) -> impl Iterator<Item = &mut TaggedInterval> + 'a {
-        self.intervals
-            .iter_mut()
-            .filter(move |int| filter.apply(int))
+    pub fn filter_mut(&mut self, filter: Filter) -> impl Iterator<Item = &mut TaggedInterval> {
+        self.intervals.iter_mut().filter(filter.closure_mut())
     }
 
-    pub fn open(&mut self, tag: &str) -> Result<&TaggedInterval, TimeLogError> {
-        // lol clippy doesn't know this isn't actually an iterator
-        #![allow(clippy::filter_next)]
-
+    pub fn open(&mut self, tag: &str) -> Result<TaggedInterval, TimeLogError> {
         let tag = self.tags.get_id_or_insert(tag);
+        let now_floor = interval::floor_time(&Utc::now());
+        let filter = filter::has_tag(tag) & (filter::is_open() | filter::ended_after(now_floor));
 
-        if self
-            .filter(filter::has_tag(tag) & filter::is_open())
-            .next()
-            .is_some()
-        {
-            Err(TagAlreadyOpen)
-        } else {
-            self.intervals.push(TaggedInterval::open_now(tag));
-            Ok(self.intervals.last().unwrap())
+        if let Some(int) = self.iter_mut().find(filter.closure_mut()) {
+            return if !int.is_closed() {
+                Err(TagAlreadyOpen)
+            } else {
+                *int = TaggedInterval::open(int.tag(), int.start());
+                Ok(*int)
+            };
         }
+
+        let new_int = TaggedInterval::open(tag, now_floor);
+        self.intervals.push(new_int);
+        Ok(*self.intervals.last().unwrap())
     }
 
-    pub fn close(&mut self, tag: &str) -> Result<&TaggedInterval, TimeLogError> {
+    pub fn close(&mut self, tag: &str) -> Result<TaggedInterval, TimeLogError> {
         let tag = self.tags.get_id(tag).ok_or(TagNotOpen)?;
 
         if let Some(int) = self
@@ -73,7 +71,7 @@ impl TimeLog {
         {
             *int = int.close_now().unwrap();
             *int = int.round_to_quarter_hours();
-            Ok(&(*int))
+            Ok(*int)
         } else {
             Err(TagNotOpen)
         }

@@ -1,8 +1,6 @@
 use crate::timelog::TimeLog;
 use crate::commands::Command;
 
-use dirs;
-use serde_json;
 use structopt::StructOpt;
 
 use std::env;
@@ -19,11 +17,14 @@ use ConfigError::*;
 /// Log time.
 ///
 /// The log file to read/write is selected as follows:
-/// - The value of the `--file` argument, if given.
-/// - If the `--file` argument is absent and the `TIMELOG_LOGFILE` environment variable is set,
-///   timelog will use its value.
-/// - As a final attempt, timelog will attempt to use `${HOME}/.timelog`.
+/// 1. The value of the `--file` argument, if given.
+/// 2. If the `--file` argument is absent and the `TIMELOG_LOGFILE` environment variable is set,
+///    timelog will use its value.
+/// 3. Finally, timelog will attempt to use `${HOME}/.timelog`.
+///
+/// If none of these locations can be found, timelog will report an error.
 #[derive(Debug, Clone, StructOpt)]
+#[structopt(verbatim_doc_comment)]
 pub struct Options {
     /// The logfile to read or write.
     #[structopt(long = "file", short = "f")]
