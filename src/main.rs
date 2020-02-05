@@ -8,7 +8,8 @@ use std::process;
 use std::fmt::{self, Formatter, Display};
 
 fn main() {
-    if run().is_err() {
+    if let Err(err) = run() {
+        eprintln!("Error: {}", err);
         process::exit(1);
     }
 }

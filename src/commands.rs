@@ -59,12 +59,20 @@ pub struct TagsInRange {
     #[structopt(short, long, parse(try_from_str = datetime_from_str))]
     after: Option<DateTime<Utc>>,
 
+    /// Select only open intervals. Mutually exclusive with --closed.
+    #[structopt(short, long)]
+    open: bool,
+
+    /// Select only closed intervals. Mutually exclusive with --open.
+    #[structopt(short, long)]
+    closed: bool,
+
     /// Select only intervals with these tags. If none are given, select intervals with any tag.
     tags: Vec<String>,
 }
 
 impl TagsInRange {
-    pub fn filter(&self, timelog: &TimeLog) -> Filter {
+    pub fn filter(&self, timelog: &TimeLog) -> Result<Filter, CommandError> {
         let tags_filter = if self.tags.is_empty() {
             Filter::True
         } else {
@@ -90,7 +98,16 @@ impl TagsInRange {
             Filter::True
         };
 
-        tags_filter & before_filter & after_filter
+        let open_closed_filter = {
+            match (self.open, self.closed) {
+                (true, true) => Err(CommandError::InconsistentFilter),
+                (true, false) => Ok(filter::is_open()),
+                (false, true) => Ok(filter::is_closed()),
+                (false, false) => Ok(Filter::True),
+            }
+        }?;
+
+        Ok(tags_filter & before_filter & after_filter & open_closed_filter)
     }
 }
 
@@ -105,22 +122,10 @@ impl Command {
                 &tag.as_ref().cloned().unwrap_or_else(|| "default".into()),
                 timelog,
             ),
-            Command::List { info } => {
-                list(info, timelog);
-                Ok(())
-            }
-            Command::Purge { info } => {
-                purge(info, timelog);
-                Ok(())
-            }
-            Command::Aggregate { info } => {
-                aggregate(info, timelog);
-                Ok(())
-            }
-            Command::Status { tags } => {
-                status(tags.as_ref(), timelog);
-                Ok(())
-            }
+            Command::List { info } => list(info, timelog),
+            Command::Purge { info } => purge(info, timelog),
+            Command::Aggregate { info } => aggregate(info, timelog),
+            Command::Status { tags } => status(tags.as_ref(), timelog),
         }
     }
 }
@@ -156,9 +161,10 @@ fn close(tag: &str, timelog: &mut TimeLog) -> Result<(), CommandError> {
     }
 }
 
-fn list(info: &TagsInRange, timelog: &TimeLog) {
-    let filter = info.filter(timelog);
+fn list(info: &TagsInRange, timelog: &TimeLog) -> Result<(), CommandError> {
+    let filter = info.filter(timelog)?;
     list_filter(&filter, timelog);
+    Ok(())
 }
 
 fn list_filter(filter: &Filter, timelog: &TimeLog) {
@@ -168,8 +174,8 @@ fn list_filter(filter: &Filter, timelog: &TimeLog) {
     }
 }
 
-fn purge(info: &TagsInRange, timelog: &mut TimeLog) {
-    let filter = info.filter(timelog);
+fn purge(info: &TagsInRange, timelog: &mut TimeLog) -> Result<(), CommandError> {
+    let filter = info.filter(timelog)?;
 
     if filter == Filter::True {
         println!("Purging ALL INTERVALS!");
@@ -185,10 +191,12 @@ fn purge(info: &TagsInRange, timelog: &mut TimeLog) {
     } else {
         println!("Purge cancelled.");
     }
+
+    Ok(())
 }
 
-fn aggregate(info: &TagsInRange, timelog: &TimeLog) {
-    let filter = info.filter(timelog);
+fn aggregate(info: &TagsInRange, timelog: &TimeLog) -> Result<(), CommandError> {
+    let filter = info.filter(timelog)?;
 
     println!("Aggregating the following intervals:");
     list_filter(&filter, timelog);
@@ -204,9 +212,11 @@ fn aggregate(info: &TagsInRange, timelog: &TimeLog) {
         total.num_hours(),
         total.num_minutes() % 60
     );
+
+    Ok(())
 }
 
-fn status(tags: &[String], timelog: &TimeLog) {
+fn status(tags: &[String], timelog: &TimeLog) -> Result<(), CommandError> {
     let filter = if tags.is_empty() {
         filter::is_open()
     } else {
@@ -222,6 +232,8 @@ fn status(tags: &[String], timelog: &TimeLog) {
 
     println!("Currently open intervals:");
     list_filter(&filter, timelog);
+
+    Ok(())
 }
 
 fn user_confirmation(default: bool) -> bool {
@@ -269,6 +281,7 @@ fn user_confirmation(default: bool) -> bool {
 pub enum CommandError {
     TimeLogError(TimeLogError),
     TimeParseError,
+    InconsistentFilter,
 }
 
 impl Display for CommandError {
@@ -276,6 +289,7 @@ impl Display for CommandError {
         match self {
             CommandError::TimeLogError(err) => Display::fmt(err, f),
             CommandError::TimeParseError => write!(f, "error parsing time specification"),
+            CommandError::InconsistentFilter => write!(f, "inconsistent filters specified"),
         }
     }
 }
