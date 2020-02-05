@@ -5,15 +5,11 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 
 use std::ops::{BitAnd, BitOr, Not};
 
-/*
-pub struct Filter<'a> {
-    pub filter: Box<dyn Fn(&TaggedInterval) -> bool + 'a>,
-}
-*/
-
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Filter {
     // Terminals
+    True,
+    False,
     HasTag(TagId),
     IsClosed,
     StartedBefore(DateTime<Utc>),
@@ -29,11 +25,13 @@ pub enum Filter {
 impl Filter {
     pub fn eval(&self, int: &TaggedInterval) -> bool {
         match self {
+            Filter::True => true,
+            Filter::False => false,
             Filter::HasTag(tag) => int.tag() == *tag,
-            Filter::IsClosed => int.duration().is_some(),
+            Filter::IsClosed => int.end().is_some(),
             Filter::StartedBefore(time) => int.start() < *time,
             Filter::EndedBefore(time) => int.end().map(|end| end < *time).unwrap_or(false),
-            Filter::ShorterThan(dur) => int.duration().map(|duration| duration < *dur).unwrap_or(false),
+            Filter::ShorterThan(dur) => int.duration() < *dur,
 
             Filter::Not(f) => !f.eval(int),
             Filter::And(f1, f2) => f1.eval(int) && f2.eval(int),
@@ -41,28 +39,49 @@ impl Filter {
         }
     }
 
-    pub fn closure(self) -> impl Fn(&TaggedInterval) -> bool + 'static {
-        move |int| self.eval(int)
+    pub fn closure(&self) -> impl Fn(&TaggedInterval) -> bool + 'static {
+        let clone = self.clone();
+        move |int| clone.eval(int)
     }
 
-    pub fn closure_ref(self) -> impl Fn(&&TaggedInterval) -> bool + 'static {
-        move |int| self.eval(int)
+    pub fn closure_ref(&self) -> impl Fn(&&TaggedInterval) -> bool + 'static {
+        let clone = self.clone();
+        move |int| clone.eval(int)
     }
 
-    pub fn closure_mut(self) -> impl FnMut(&&mut TaggedInterval) -> bool + 'static {
-        move |int| self.eval(int)
+    pub fn closure_mut(&self) -> impl FnMut(&&mut TaggedInterval) -> bool + 'static {
+        let clone = self.clone();
+        move |int| clone.eval(int)
     }
 
     pub fn or(self, other: Filter) -> Filter {
-        Filter::Or(Box::new(self), Box::new(other))
+        match (self, other) {
+            (Filter::True, _) => Filter::True,
+            (_, Filter::True) => Filter::True,
+            (Filter::False, rhs) => rhs,
+            (lhs, Filter::False) => lhs,
+
+            (lhs, rhs) => Filter::Or(Box::new(lhs), Box::new(rhs)),
+        }
     }
 
     pub fn and(self, other: Filter) -> Filter {
-        Filter::And(Box::new(self), Box::new(other))
+        match (self, other) {
+            (Filter::True, rhs) => rhs,
+            (lhs, Filter::True) => lhs,
+            (Filter::False, _) => Filter::False,
+            (_, Filter::False) => Filter::False,
+
+            (lhs, rhs) => Filter::And(Box::new(lhs), Box::new(rhs)),
+        }
     }
 
     pub fn inverted(self) -> Filter {
-        Filter::Not(Box::new(self))
+        match self {
+            Filter::False => Filter::True,
+            Filter::True => Filter::False,
+            other => Filter::Not(Box::new(other)),
+        }
     }
 }
 
@@ -88,6 +107,20 @@ impl BitOr for Filter {
     fn bitor(self, rhs: Filter) -> Filter {
         self.or(rhs)
     }
+}
+
+pub fn and_all<I>(filters: I) -> Filter
+where
+    I: IntoIterator<Item = Filter>,
+{
+    filters.into_iter().fold(Filter::True, Filter::and)
+}
+
+pub fn or_all<I>(filters: I) -> Filter
+where
+    I: IntoIterator<Item = Filter>,
+{
+    filters.into_iter().fold(Filter::False, Filter::or)
 }
 
 pub fn has_tag(tag: TagId) -> Filter {

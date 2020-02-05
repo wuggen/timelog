@@ -4,9 +4,16 @@ use timelog::commands::CommandError;
 use structopt::StructOpt;
 
 use std::error::Error;
+use std::process;
 use std::fmt::{self, Formatter, Display};
 
-fn main() -> Result<(), MainError> {
+fn main() {
+    if run().is_err() {
+        process::exit(1);
+    }
+}
+
+fn run() -> Result<(), MainError> {
     let options = Options::from_args();
     let mut timelog = config::current_timelog(&options)?;
     options.command.execute(&mut timelog)?;

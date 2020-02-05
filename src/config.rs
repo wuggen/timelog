@@ -1,5 +1,5 @@
-use crate::timelog::TimeLog;
 use crate::commands::Command;
+use crate::timelog::TimeLog;
 
 use structopt::StructOpt;
 

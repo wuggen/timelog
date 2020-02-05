@@ -1,5 +1,5 @@
 use crate::filter::{self, Filter};
-use crate::interval::{self, TaggedInterval};
+use crate::interval::{self, Interval, TaggedInterval};
 use crate::tags::{TagId, Tags};
 
 use chrono::Utc;
@@ -27,6 +27,10 @@ impl TimeLog {
         self.tags.get_name(tag)
     }
 
+    pub fn tag_id(&self, tag: &str) -> Option<TagId> {
+        self.tags.get_id(tag)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &TaggedInterval> {
         self.intervals.iter()
     }
@@ -35,12 +39,31 @@ impl TimeLog {
         self.intervals.iter_mut()
     }
 
-    pub fn filter(&self, filter: Filter) -> impl Iterator<Item = &TaggedInterval> {
-        self.intervals.iter().filter(filter.closure_ref())
+    pub fn remove(&mut self, filter: &Filter) {
+        self.retain(&(!filter.clone()));
     }
 
-    pub fn filter_mut(&mut self, filter: Filter) -> impl Iterator<Item = &mut TaggedInterval> {
-        self.intervals.iter_mut().filter(filter.closure_mut())
+    pub fn retain(&mut self, filter: &Filter) {
+        self.intervals = self.iter().cloned().filter(filter.closure()).collect();
+    }
+
+    pub fn gc_tag_names(&mut self) {
+        let mut new_log = TimeLog::new();
+        for int in self.intervals.iter() {
+            let tag = self.tags.get_name(int.tag()).unwrap();
+
+            new_log.insert_unchecked(tag, *int.interval());
+        }
+
+        self.tags = new_log.tags;
+        self.intervals = new_log.intervals;
+    }
+
+    fn insert_unchecked(&mut self, tag: &str, int: Interval) -> TaggedInterval {
+        let tag = self.tags.get_id_or_insert(tag);
+        let int = TaggedInterval::new(tag, int);
+        self.intervals.push(int);
+        *self.intervals.last().unwrap()
     }
 
     pub fn open(&mut self, tag: &str) -> Result<TaggedInterval, TimeLogError> {
@@ -64,11 +87,9 @@ impl TimeLog {
 
     pub fn close(&mut self, tag: &str) -> Result<TaggedInterval, TimeLogError> {
         let tag = self.tags.get_id(tag).ok_or(TagNotOpen)?;
+        let filter = filter::has_tag(tag) & filter::is_open();
 
-        if let Some(int) = self
-            .filter_mut(filter::has_tag(tag) & filter::is_open())
-            .next()
-        {
+        if let Some(int) = self.iter_mut().filter(filter.closure_mut()).next() {
             *int = int.close_now().unwrap();
             *int = int.round_to_quarter_hours();
             Ok(*int)

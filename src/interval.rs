@@ -85,8 +85,10 @@ impl Interval {
             .map(|d| self.start + Duration::from_std(d).unwrap())
     }
 
-    pub fn duration(&self) -> Option<Duration> {
-        self.duration.map(|d| Duration::from_std(d).unwrap())
+    pub fn duration(&self) -> Duration {
+        self.duration
+            .map(|d| Duration::from_std(d).unwrap())
+            .unwrap_or_else(|| ceil_time(&Utc::now()).signed_duration_since(self.start))
     }
 }
 
@@ -106,7 +108,7 @@ impl Display for Interval {
                     "{} -- {} ({})",
                     start.format(FMT_STR),
                     end.format(FMT_STR),
-                    fmt_duration(self.duration().unwrap()),
+                    fmt_duration(self.duration()),
                 )
             }
 
@@ -114,7 +116,7 @@ impl Display for Interval {
                 f,
                 "{} -- OPEN ({})",
                 start.format(FMT_STR),
-                fmt_duration(ceil_time(&Utc::now()).signed_duration_since(self.start())),
+                fmt_duration(self.duration()),
             ),
         }
     }
@@ -175,7 +177,7 @@ impl TaggedInterval {
         self.interval.end()
     }
 
-    pub fn duration(&self) -> Option<Duration> {
+    pub fn duration(&self) -> Duration {
         self.interval.duration()
     }
 
