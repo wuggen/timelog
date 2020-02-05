@@ -17,8 +17,9 @@ fn main() {
 fn run() -> Result<(), MainError> {
     let options = Options::from_args();
     let mut timelog = config::current_timelog(&options)?;
-    options.command.execute(&mut timelog)?;
-    config::write_timelog(&options, &timelog)?;
+    if options.command.execute(&mut timelog)?.is_changed() {
+        config::write_timelog(&options, &timelog)?;
+    }
     Ok(())
 }
 
