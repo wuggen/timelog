@@ -67,6 +67,10 @@ pub struct TagsInRange {
     #[structopt(short, long, parse(try_from_str = datetime_from_str))]
     after: Option<DateTime<Utc>>,
 
+    /// Select only intervals that ended after the most recent midnight (or are currently open).
+    #[structopt(long)]
+    today: bool,
+
     /// Select only open intervals. Mutually exclusive with --closed.
     #[structopt(short, long)]
     open: bool,
@@ -94,14 +98,31 @@ impl TagsInRange {
             )
         };
 
-        let before_filter = if let Some(datetime) = self.before {
-            filter::started_before(datetime)
+        let todaytime = Local::today().and_hms(0, 0, 0);
+        let todaytime = (todaytime - todaytime.offset().fix()).with_timezone(&Utc);
+        let tomorrowtime = todaytime + Duration::days(1);
+
+        let before_filter = if let Some(beforetime) = self.before {
+            if self.today && tomorrowtime < beforetime {
+                filter::started_before(tomorrowtime)
+            } else {
+                filter::started_before(beforetime)
+            }
+        } else if self.today {
+            filter::started_before(tomorrowtime)
         } else {
             Filter::True
         };
 
-        let after_filter = if let Some(datetime) = self.after {
-            filter::ended_after(datetime) | filter::is_open()
+        let after_filter = if let Some(aftertime) = self.after {
+            filter::is_open()
+                | if self.today && aftertime < todaytime {
+                    filter::ended_after(todaytime)
+                } else {
+                    filter::ended_after(aftertime)
+                }
+        } else if self.today {
+            filter::is_open() | filter::ended_after(todaytime)
         } else {
             Filter::True
         };

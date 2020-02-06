@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "timelog"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "dirs 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
