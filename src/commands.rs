@@ -86,7 +86,7 @@ pub struct TagsInRange {
 impl TagsInRange {
     pub fn filter(&self, timelog: &TimeLog) -> Result<Filter, CommandError> {
         let tags_filter = if self.tags.is_empty() {
-            Filter::True
+            filter::filter_true()
         } else {
             filter::or_all(
                 self.tags
@@ -111,7 +111,7 @@ impl TagsInRange {
         } else if self.today {
             filter::started_before(tomorrowtime)
         } else {
-            Filter::True
+            filter::filter_true()
         };
 
         let after_filter = if let Some(aftertime) = self.after {
@@ -124,7 +124,7 @@ impl TagsInRange {
         } else if self.today {
             filter::is_open() | filter::ended_after(todaytime)
         } else {
-            Filter::True
+            filter::filter_true()
         };
 
         let open_closed_filter = {
@@ -132,7 +132,7 @@ impl TagsInRange {
                 (true, true) => Err(CommandError::InconsistentFilter),
                 (true, false) => Ok(filter::is_open()),
                 (false, true) => Ok(filter::is_closed()),
-                (false, false) => Ok(Filter::True),
+                (false, false) => Ok(filter::filter_true()),
             }
         }?;
 
@@ -197,7 +197,7 @@ fn list(info: &TagsInRange, timelog: &TimeLog) -> Result<ChangeStatus, CommandEr
 }
 
 fn list_filter(filter: &Filter, timelog: &TimeLog) {
-    for int in timelog.iter().filter(filter.closure_ref()) {
+    for int in timelog.iter().filter(filter.build_ref()) {
         let tag = timelog.tag_name(int.tag()).unwrap();
         println!("{}: {}", tag, int.interval());
     }
@@ -205,9 +205,10 @@ fn list_filter(filter: &Filter, timelog: &TimeLog) {
 
 fn purge(info: &TagsInRange, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
     let filter = info.filter(timelog)?;
+    let filter_fn = filter.build();
 
-    if timelog.iter().any(filter.closure()) {
-        if filter == Filter::True {
+    if timelog.iter().any(&filter_fn) {
+        if filter.evals_true() {
             println!("Purging ALL INTERVALS!");
         } else {
             println!("Purging the following intervals:");
@@ -216,7 +217,7 @@ fn purge(info: &TagsInRange, timelog: &mut TimeLog) -> Result<ChangeStatus, Comm
 
         if user_confirmation(false) {
             println!("Purging.");
-            timelog.remove(&filter);
+            timelog.remove(&filter_fn);
             timelog.gc_tag_names();
             Ok(ChangeStatus::Changed)
         } else {
@@ -235,9 +236,11 @@ fn aggregate(info: &TagsInRange, timelog: &TimeLog) -> Result<ChangeStatus, Comm
     println!("Aggregating the following intervals:");
     list_filter(&filter, timelog);
 
+    let filter = filter.build_ref();
+
     let total = timelog
         .iter()
-        .filter(filter.closure_ref())
+        .filter(filter)
         .fold(Duration::seconds(0), |d, int| d + int.duration());
 
     println!(
@@ -263,7 +266,7 @@ fn status(tags: &[String], timelog: &TimeLog) -> Result<ChangeStatus, CommandErr
         filter::is_open() & tags_filter
     };
 
-    if timelog.iter().any(filter.closure()) {
+    if timelog.iter().any(filter.build()) {
         println!("Currently open intervals:");
         list_filter(&filter, timelog);
     } else {

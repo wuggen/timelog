@@ -1,6 +1,6 @@
 [package]
 name = "timelog"
-version = "0.2.3"
+version = "0.2.5"
 authors = ["John Andrews <theunderdog09@gmail.com>"]
 edition = "2018"
 

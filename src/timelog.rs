@@ -1,4 +1,4 @@
-use crate::filter::{self, Filter};
+use crate::filter;
 use crate::interval::{self, Interval, TaggedInterval};
 use crate::tags::{TagId, Tags};
 
@@ -39,12 +39,18 @@ impl TimeLog {
         self.intervals.iter_mut()
     }
 
-    pub fn remove(&mut self, filter: &Filter) {
-        self.retain(&(!filter.clone()));
+    pub fn remove<F>(&mut self, mut filter: F)
+    where
+        F: FnMut(&TaggedInterval) -> bool
+    {
+        self.retain(|int| !filter(int));
     }
 
-    pub fn retain(&mut self, filter: &Filter) {
-        self.intervals = self.iter().cloned().filter(filter.closure()).collect();
+    pub fn retain<F>(&mut self, filter: F)
+    where
+        F: FnMut(&TaggedInterval) -> bool
+    {
+        self.intervals = self.iter().cloned().filter(filter).collect();
     }
 
     pub fn gc_tag_names(&mut self) {
@@ -71,25 +77,26 @@ impl TimeLog {
         let now_floor = interval::floor_time(&Utc::now());
         let filter = filter::has_tag(tag) & (filter::is_open() | filter::ended_after(now_floor));
 
-        if let Some(int) = self.iter_mut().find(filter.closure_mut()) {
-            return if !int.is_closed() {
+        let int = self.iter_mut().find(filter.build_mut());
+        if let Some(int) = int {
+            if !int.is_closed() {
                 Err(TagAlreadyOpen)
             } else {
                 *int = TaggedInterval::open(int.tag(), int.start());
                 Ok(*int)
-            };
+            }
+        } else {
+            let new_int = TaggedInterval::open(tag, now_floor);
+            self.intervals.push(new_int);
+            Ok(*self.intervals.last().unwrap())
         }
-
-        let new_int = TaggedInterval::open(tag, now_floor);
-        self.intervals.push(new_int);
-        Ok(*self.intervals.last().unwrap())
     }
 
     pub fn close(&mut self, tag: &str) -> Result<TaggedInterval, TimeLogError> {
         let tag = self.tags.get_id(tag).ok_or(TagNotOpen)?;
         let filter = filter::has_tag(tag) & filter::is_open();
 
-        if let Some(int) = self.iter_mut().filter(filter.closure_mut()).next() {
+        if let Some(int) = self.iter_mut().find(filter.build_mut()) {
             *int = int.close_now().unwrap();
             *int = int.round_to_quarter_hours();
             Ok(*int)
