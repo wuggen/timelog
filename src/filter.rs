@@ -5,7 +5,9 @@ use chrono::{DateTime, Duration, Utc};
 
 use std::ops::{BitAnd, BitOr, Not};
 
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+use std::fmt::{self, Debug, Formatter};
+
+#[derive(Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Filter {
     // Reverse-Polish-notation representation of the filter expression
     nodes: Vec<FilterNode>,
@@ -194,6 +196,76 @@ pub fn with_duration_at_least(duration: Duration) -> Filter {
 
 pub fn with_duration_at_most(duration: Duration) -> Filter {
     shorter_than(duration + Duration::nanoseconds(1))
+}
+
+impl Debug for Filter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Filter {{ nodes: ")?;
+        write_as_tree(&self.nodes[..], self.nodes.len(), f)?;
+        write!(f, " }}")
+    }
+}
+
+fn write_as_tree(nodes: &[FilterNode], idx: usize, f: &mut Formatter) -> Result<usize, fmt::Error> {
+    if let Some(node) = nodes.get(idx - 1) {
+        match node {
+            FilterNode::True => {
+                write!(f, "True")?;
+                Ok(idx - 1)
+            }
+            FilterNode::False => {
+                write!(f, "False")?;
+                Ok(idx - 1)
+            }
+            FilterNode::HasTag(tag) => {
+                write!(f, "HasTag({})", tag)?;
+                Ok(idx - 1)
+            }
+            FilterNode::IsClosed => {
+                write!(f, "IsClosed")?;
+                Ok(idx - 1)
+            }
+            FilterNode::StartedBefore(time) => {
+                write!(f, "StartedBefore({:?})", time)?;
+                Ok(idx - 1)
+            }
+            FilterNode::EndedBefore(time) => {
+                write!(f, "EndedBefore({:?})", time)?;
+                Ok(idx - 1)
+            }
+            FilterNode::ShorterThan(dur) => {
+                write!(f, "ShorterThan({:?})", dur)?;
+                Ok(idx - 1)
+            }
+
+            FilterNode::Not => {
+                write!(f, "Not(")?;
+                let new_idx = write_as_tree(nodes, idx - 1, f)?;
+                write!(f, ")")?;
+                Ok(new_idx)
+            }
+
+            FilterNode::And => {
+                write!(f, "And(")?;
+                let new_idx = write_as_tree(nodes, idx - 1, f)?;
+                write!(f, ", ")?;
+                let new_idx = write_as_tree(nodes, new_idx, f)?;
+                write!(f, ")")?;
+                Ok(new_idx)
+            }
+
+            FilterNode::Or => {
+                write!(f, "Or(")?;
+                let new_idx = write_as_tree(nodes, idx - 1, f)?;
+                write!(f, ", ")?;
+                let new_idx = write_as_tree(nodes, new_idx, f)?;
+                write!(f, ")")?;
+                Ok(new_idx)
+            }
+        }
+    } else {
+        Ok(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]

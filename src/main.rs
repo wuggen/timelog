@@ -16,6 +16,12 @@ fn main() {
 
 fn run() -> Result<(), MainError> {
     let options = Options::from_args();
+
+    stderrlog::new()
+        .verbosity(options.verbose)
+        .init()
+        .unwrap();
+
     let mut timelog = config::current_timelog(&options)?;
     if options.command.execute(&mut timelog)?.is_changed() {
         config::write_timelog(&options, &timelog)?;

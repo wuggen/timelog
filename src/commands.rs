@@ -88,14 +88,10 @@ impl TagsInRange {
         let tags_filter = if self.tags.is_empty() {
             filter::filter_true()
         } else {
-            filter::or_all(
-                self.tags
-                    .iter()
-                    .map(|name| timelog.tag_id(name))
-                    .filter(Option::is_some)
-                    .map(Option::unwrap)
-                    .map(filter::has_tag),
-            )
+            filter::or_all(self.tags.iter().filter_map(|name| {
+                let tag = timelog.tag_id(name)?;
+                Some(filter::has_tag(tag))
+            }))
         };
 
         let todaytime = Local::today().and_hms(0, 0, 0);
@@ -136,7 +132,20 @@ impl TagsInRange {
             }
         }?;
 
-        Ok(tags_filter & before_filter & after_filter & open_closed_filter)
+        let res = tags_filter & before_filter & after_filter & open_closed_filter;
+        debug!("TagsInRange filter: {:?}", res);
+
+        Ok(res)
+    }
+
+    fn log_debug(&self) {
+        if let Some(before) = self.before {
+            debug!("Before time: {}", before);
+        }
+
+        if let Some(after) = self.after {
+            debug!("After time: {}", after);
+        }
     }
 }
 
@@ -151,9 +160,18 @@ impl Command {
                 &tag.as_ref().cloned().unwrap_or_else(|| "default".into()),
                 timelog,
             ),
-            Command::List { info } => list(info, timelog),
-            Command::Purge { info } => purge(info, timelog),
-            Command::Aggregate { info } => aggregate(info, timelog),
+            Command::List { info } => {
+                info.log_debug();
+                list(info, timelog)
+            }
+            Command::Purge { info } => {
+                info.log_debug();
+                purge(info, timelog)
+            }
+            Command::Aggregate { info } => {
+                info.log_debug();
+                aggregate(info, timelog)
+            }
             Command::Status { tags } => status(tags.as_ref(), timelog),
         }
     }
@@ -367,7 +385,8 @@ fn datetime_from_str(s: &str) -> Result<DateTime<Utc>, CommandError> {
 
     for fmt in DATE_FMTS {
         if let Ok(date) = NaiveDate::parse_from_str(&s, fmt) {
-            let datetime = NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0));
+            let datetime =
+                NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0)) - now.offset().fix();
             return Ok(Utc.from_local_datetime(&datetime).unwrap());
         }
     }
@@ -385,5 +404,52 @@ fn datetime_from_str(s: &str) -> Result<DateTime<Utc>, CommandError> {
         }
     }
 
+    match s.chars().nth(0) {
+        Some(c) if c == '+' || c == '-' => {
+            let s = &s[1..];
+            let dur = duration_from_str(s)?;
+            if c == '+' {
+                return Ok(Utc::now() + dur);
+            } else {
+                return Ok(Utc::now() - dur);
+            }
+        }
+        _ => (),
+    }
+
     Err(CommandError::TimeParseError)
+}
+
+fn duration_from_str(s: &str) -> Result<Duration, CommandError> {
+    let tokens: Vec<_> = s.split(':').collect();
+
+    let (hours, minutes, seconds) = if tokens.len() == 1 {
+        (
+            u64::from_str_radix(tokens[0], 10).map_err(|_| CommandError::TimeParseError)?,
+            0,
+            0,
+        )
+    } else if tokens.len() == 2 {
+        (
+            u64::from_str_radix(tokens[0], 10).map_err(|_| CommandError::TimeParseError)?,
+            u64::from_str_radix(tokens[1], 10).map_err(|_| CommandError::TimeParseError)?,
+            0,
+        )
+    } else if tokens.len() == 3 {
+        (
+            u64::from_str_radix(tokens[0], 10).map_err(|_| CommandError::TimeParseError)?,
+            u64::from_str_radix(tokens[1], 10).map_err(|_| CommandError::TimeParseError)?,
+            u64::from_str_radix(tokens[2], 10).map_err(|_| CommandError::TimeParseError)?,
+        )
+    } else {
+        return Err(CommandError::TimeParseError);
+    };
+
+    if minutes >= 60 || seconds >= 60 {
+        return Err(CommandError::TimeParseError);
+    }
+
+    Ok(Duration::seconds(
+        seconds as i64 + 60 * minutes as i64 + 60 * 60 * hours as i64,
+    ))
 }

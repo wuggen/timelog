@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate log;
 
 pub mod interval;
 pub mod tags;

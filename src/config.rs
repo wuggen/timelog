@@ -30,6 +30,9 @@ pub struct Options {
     #[structopt(long = "file", short = "f")]
     pub logfile: Option<PathBuf>,
 
+    #[structopt(long, short, parse(from_occurrences))]
+    pub verbose: usize,
+
     #[structopt(subcommand)]
     pub command: Command,
 }
