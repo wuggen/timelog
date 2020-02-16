@@ -6,6 +6,7 @@ use chrono::offset::Offset;
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use structopt::StructOpt;
 
+use std::collections::BTreeSet;
 use std::io::{self, Write};
 
 use std::error::Error;
@@ -26,7 +27,13 @@ impl ChangeStatus {
 #[derive(Debug, Clone, StructOpt)]
 pub enum Command {
     /// Open a new interval for the given tag, or the tag 'default'.
-    Open { tag: Option<String> },
+    Open {
+        tag: Option<String>,
+
+        /// Whether to allow creation of a new tag without prompt.
+        #[structopt(short, long)]
+        create: bool,
+    },
 
     /// Close the currently open interval for the given tag, or the tag 'default'.
     Close { tag: Option<String> },
@@ -55,6 +62,9 @@ pub enum Command {
         /// tags.
         tags: Vec<String>,
     },
+
+    /// List current tags.
+    Tags,
 }
 
 #[derive(Debug, Clone, StructOpt)]
@@ -152,8 +162,9 @@ impl TagsInRange {
 impl Command {
     pub fn execute(&self, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
         match self {
-            Command::Open { tag } => open(
+            Command::Open { tag, create } => open(
                 &tag.as_ref().cloned().unwrap_or_else(|| "default".into()),
+                *create,
                 timelog,
             ),
             Command::Close { tag } => close(
@@ -173,15 +184,25 @@ impl Command {
                 aggregate(info, timelog)
             }
             Command::Status { tags } => status(tags.as_ref(), timelog),
+
+            Command::Tags => tags(timelog),
         }
     }
 }
 
-fn open(tag: &str, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
+fn open(tag: &str, create: bool, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
+    if timelog.tag_id(tag).is_none() && tag != "default" && !create {
+        eprintln!("Creating new tag '{}'.", tag);
+        if !user_confirmation(false) {
+            eprintln!("Cancelling open");
+            return Ok(ChangeStatus::Unchanged);
+        }
+    }
+
     match timelog.open(tag) {
         Ok(int) => {
             let start = Local.from_utc_datetime(&int.start().naive_utc());
-            println!(
+            eprintln!(
                 "Opened new interval for tag '{}' at {}",
                 tag,
                 start.format(interval::FMT_STR)
@@ -189,7 +210,6 @@ fn open(tag: &str, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> 
             Ok(ChangeStatus::Changed)
         }
         Err(err) => {
-            eprintln!("Error opening new interval for tag '{}': {}", tag, err);
             Err(err.into())
         }
     }
@@ -198,11 +218,10 @@ fn open(tag: &str, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> 
 fn close(tag: &str, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
     match timelog.close(tag) {
         Ok(int) => {
-            println!("Closed interval for tag '{}': {}", tag, int.interval());
+            eprintln!("Closed interval for tag '{}': {}", tag, int.interval());
             Ok(ChangeStatus::Changed)
         }
         Err(err) => {
-            eprintln!("Error closing interval for tag '{}': {}", tag, err);
             Err(err.into())
         }
     }
@@ -227,23 +246,23 @@ fn purge(info: &TagsInRange, timelog: &mut TimeLog) -> Result<ChangeStatus, Comm
 
     if timelog.iter().any(&filter_fn) {
         if filter.evals_true() {
-            println!("Purging ALL INTERVALS!");
+            eprintln!("Purging ALL INTERVALS!");
         } else {
-            println!("Purging the following intervals:");
+            eprintln!("Purging the following intervals:");
             list_filter(&filter, timelog);
         }
 
         if user_confirmation(false) {
-            println!("Purging.");
+            eprintln!("Purging.");
             timelog.remove(&filter_fn);
             timelog.gc_tag_names();
             Ok(ChangeStatus::Changed)
         } else {
-            println!("Purge cancelled.");
+            eprintln!("Purge cancelled.");
             Ok(ChangeStatus::Unchanged)
         }
     } else {
-        println!("No intervals match filter criteria; purge cancelled.");
+        eprintln!("No intervals match filter criteria; purge cancelled.");
         Ok(ChangeStatus::Unchanged)
     }
 }
@@ -251,7 +270,7 @@ fn purge(info: &TagsInRange, timelog: &mut TimeLog) -> Result<ChangeStatus, Comm
 fn aggregate(info: &TagsInRange, timelog: &TimeLog) -> Result<ChangeStatus, CommandError> {
     let filter = info.filter(timelog)?;
 
-    println!("Aggregating the following intervals:");
+    eprintln!("Aggregating the following intervals:");
     list_filter(&filter, timelog);
 
     let filter = filter.build_ref();
@@ -262,7 +281,7 @@ fn aggregate(info: &TagsInRange, timelog: &TimeLog) -> Result<ChangeStatus, Comm
         .fold(Duration::seconds(0), |d, int| d + int.duration());
 
     println!(
-        "Total duration: {}:{:02}",
+        "Total {}:{:02}",
         total.num_hours(),
         total.num_minutes() % 60
     );
@@ -285,10 +304,23 @@ fn status(tags: &[String], timelog: &TimeLog) -> Result<ChangeStatus, CommandErr
     };
 
     if timelog.iter().any(filter.build()) {
-        println!("Currently open intervals:");
+        eprintln!("Currently open intervals:");
         list_filter(&filter, timelog);
     } else {
-        println!("No currently open intervals matching these filter criteria.");
+        eprintln!("No currently open intervals matching these filter criteria.");
+    }
+
+    Ok(ChangeStatus::Unchanged)
+}
+
+fn tags(timelog: &TimeLog) -> Result<ChangeStatus, CommandError> {
+    let tagnames: BTreeSet<_> = timelog
+        .iter()
+        .map(|int| timelog.tag_name(int.tag()).unwrap())
+        .collect();
+
+    for name in tagnames {
+        println!("{}", name);
     }
 
     Ok(ChangeStatus::Unchanged)
@@ -301,8 +333,8 @@ fn user_confirmation(default: bool) -> bool {
     let mut result = default;
 
     loop {
-        print!("Okay? {} ", options);
-        io::stdout().flush().unwrap();
+        eprint!("Okay? {} ", options);
+        io::stderr().flush().unwrap();
         io::stdin().read_line(&mut line).unwrap();
 
         let line_chars: Vec<_> = line.chars().collect();
