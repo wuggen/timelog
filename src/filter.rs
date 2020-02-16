@@ -178,24 +178,52 @@ pub fn ended_before(time: DateTime<Utc>) -> Filter {
     }
 }
 
+pub fn shorter_than(duration: Duration) -> Filter {
+    Filter {
+        nodes: vec![FilterNode::ShorterThan(duration)],
+    }
+}
+
+pub fn started_before_strict(time: DateTime<Utc>) -> Filter {
+    Filter {
+        nodes: vec![FilterNode::StartedBeforeStrict(time)],
+    }
+}
+
+pub fn ended_before_strict(time: DateTime<Utc>) -> Filter {
+    Filter {
+        nodes: vec![FilterNode::EndedBeforeStrict(time)],
+    }
+}
+
+pub fn shorter_than_strict(duration: Duration) -> Filter {
+    Filter {
+        nodes: vec![FilterNode::ShorterThanStrict(duration)],
+    }
+}
+
 pub fn started_after(time: DateTime<Utc>) -> Filter {
-    !started_before(time)
+    !started_before_strict(time)
 }
 
 pub fn ended_after(time: DateTime<Utc>) -> Filter {
+    is_closed() & !ended_before_strict(time)
+}
+
+pub fn started_after_strict(time: DateTime<Utc>) -> Filter {
+    !started_before(time)
+}
+
+pub fn ended_after_strict(time: DateTime<Utc>) -> Filter {
     is_closed() & !ended_before(time)
 }
 
-pub fn shorter_than(duration: Duration) -> Filter {
-    Filter { nodes: vec![FilterNode::ShorterThan(duration)] }
+pub fn longer_than(duration: Duration) -> Filter {
+    !shorter_than_strict(duration)
 }
 
-pub fn with_duration_at_least(duration: Duration) -> Filter {
+pub fn longer_than_strict(duration: Duration) -> Filter {
     !shorter_than(duration)
-}
-
-pub fn with_duration_at_most(duration: Duration) -> Filter {
-    shorter_than(duration + Duration::nanoseconds(1))
 }
 
 impl Debug for Filter {
@@ -235,6 +263,18 @@ fn write_as_tree(nodes: &[FilterNode], idx: usize, f: &mut Formatter) -> Result<
             }
             FilterNode::ShorterThan(dur) => {
                 write!(f, "ShorterThan({:?})", dur)?;
+                Ok(idx - 1)
+            }
+            FilterNode::StartedBeforeStrict(time) => {
+                write!(f, "StartedBeforeStrict({:?})", time)?;
+                Ok(idx - 1)
+            }
+            FilterNode::EndedBeforeStrict(time) => {
+                write!(f, "EndedBeforeStrict({:?})", time)?;
+                Ok(idx - 1)
+            }
+            FilterNode::ShorterThanStrict(dur) => {
+                write!(f, "ShorterThanStrict({:?})", dur)?;
                 Ok(idx - 1)
             }
 
@@ -278,6 +318,9 @@ enum FilterNode {
     StartedBefore(DateTime<Utc>),
     EndedBefore(DateTime<Utc>),
     ShorterThan(Duration),
+    StartedBeforeStrict(DateTime<Utc>),
+    EndedBeforeStrict(DateTime<Utc>),
+    ShorterThanStrict(Duration),
 
     // Operators
     Not,
@@ -292,11 +335,16 @@ impl FilterNode {
             FilterNode::False => stack.push(false),
             FilterNode::HasTag(tag) => stack.push(int.tag() == *tag),
             FilterNode::IsClosed => stack.push(int.end().is_some()),
-            FilterNode::StartedBefore(time) => stack.push(int.start() < *time),
+            FilterNode::StartedBefore(time) => stack.push(int.start() <= *time),
             FilterNode::EndedBefore(time) => {
+                stack.push(int.end().map(|end| end <= *time).unwrap_or(false))
+            }
+            FilterNode::ShorterThan(dur) => stack.push(int.duration() <= *dur),
+            FilterNode::StartedBeforeStrict(time) => stack.push(int.start() < *time),
+            FilterNode::EndedBeforeStrict(time) => {
                 stack.push(int.end().map(|end| end < *time).unwrap_or(false))
             }
-            FilterNode::ShorterThan(dur) => stack.push(int.duration() < *dur),
+            FilterNode::ShorterThanStrict(dur) => stack.push(int.duration() < *dur),
 
             FilterNode::Not => {
                 let b = stack.pop().unwrap_or(false);

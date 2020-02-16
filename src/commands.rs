@@ -123,12 +123,12 @@ impl TagsInRange {
         let after_filter = if let Some(aftertime) = self.after {
             filter::is_open()
                 | if self.today && aftertime < todaytime {
-                    filter::ended_after(todaytime)
+                    filter::ended_after_strict(todaytime)
                 } else {
-                    filter::ended_after(aftertime)
+                    filter::ended_after_strict(aftertime)
                 }
         } else if self.today {
-            filter::is_open() | filter::ended_after(todaytime)
+            filter::is_open() | filter::ended_after_strict(todaytime)
         } else {
             filter::filter_true()
         };
@@ -209,9 +209,7 @@ fn open(tag: &str, create: bool, timelog: &mut TimeLog) -> Result<ChangeStatus, 
             );
             Ok(ChangeStatus::Changed)
         }
-        Err(err) => {
-            Err(err.into())
-        }
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -221,9 +219,7 @@ fn close(tag: &str, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError>
             eprintln!("Closed interval for tag '{}': {}", tag, int.interval());
             Ok(ChangeStatus::Changed)
         }
-        Err(err) => {
-            Err(err.into())
-        }
+        Err(err) => Err(err.into()),
     }
 }
 
