@@ -1,5 +1,5 @@
 use timelog::config::{self, Options, ConfigError};
-use timelog::commands::CommandError;
+use timelog::commands::{CommandError, StdOutputs};
 
 use structopt::StructOpt;
 
@@ -23,7 +23,8 @@ fn run() -> Result<(), MainError> {
         .unwrap();
 
     let mut timelog = config::current_timelog(&options)?;
-    if options.command.execute(&mut timelog)?.is_changed() {
+    let outputs = StdOutputs::default();
+    if options.command.execute(&mut timelog, outputs)?.is_changed() {
         config::write_timelog(&options, &timelog)?;
     }
     Ok(())

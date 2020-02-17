@@ -67,6 +67,290 @@ pub enum Command {
     Tags,
 }
 
+impl Command {
+    pub fn execute<W>(
+        &self,
+        timelog: &mut TimeLog,
+        outputs: Outputs<W>,
+    ) -> Result<ChangeStatus, CommandError>
+    where
+        W: Write,
+    {
+        let mut context = CommandContext {
+            command: self,
+            timelog,
+            outputs,
+        };
+
+        context.execute()
+    }
+}
+
+struct CommandContext<'c, 't, W> {
+    command: &'c Command,
+    timelog: &'t mut TimeLog,
+    outputs: Outputs<W>,
+}
+
+impl<'c, 't, W> CommandContext<'c, 't, W>
+where
+    W: Write,
+{
+    fn execute(&mut self) -> Result<ChangeStatus, CommandError> {
+        match self.command {
+            Command::Open { tag, create } => self.open(
+                &tag.as_ref().cloned().unwrap_or_else(|| "default".into()),
+                *create,
+            ),
+            Command::Close { tag } => {
+                self.close(&tag.as_ref().cloned().unwrap_or_else(|| "default".into()))
+            }
+            Command::List { info } => {
+                info.log_debug();
+                self.list(info)
+            }
+            Command::Purge { info } => {
+                info.log_debug();
+                self.purge(info)
+            }
+            Command::Aggregate { info } => {
+                info.log_debug();
+                self.aggregate(info)
+            }
+            Command::Status { tags } => self.status(tags.as_ref()),
+
+            Command::Tags => self.tags(),
+        }
+    }
+
+    fn open(&mut self, tag: &str, create: bool) -> Result<ChangeStatus, CommandError> {
+        if self.timelog.tag_id(tag).is_none() && tag != "default" && !create {
+            writeln!(self.outputs.error_mut(), "Creating new tag '{}'.", tag)?;
+            if !self.user_confirmation(false)? {
+                writeln!(self.outputs.error_mut(), "Cancelling open")?;
+                return Ok(ChangeStatus::Unchanged);
+            }
+        }
+
+        match self.timelog.open(tag) {
+            Ok(int) => {
+                let start = Local.from_utc_datetime(&int.start().naive_utc());
+                writeln!(
+                    self.outputs.error_mut(),
+                    "Opened new interval for tag '{}' at {}",
+                    tag,
+                    start.format(interval::FMT_STR)
+                )?;
+                Ok(ChangeStatus::Changed)
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn close(&mut self, tag: &str) -> Result<ChangeStatus, CommandError> {
+        match self.timelog.close(tag) {
+            Ok(int) => {
+                writeln!(
+                    self.outputs.error_mut(),
+                    "Closed interval for tag '{}': {}",
+                    tag,
+                    int.interval()
+                )?;
+                Ok(ChangeStatus::Changed)
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn list(&mut self, info: &TagsInRange) -> Result<ChangeStatus, CommandError> {
+        let filter = info.filter(self.timelog)?;
+        self.list_filter(&filter)?;
+        Ok(ChangeStatus::Unchanged)
+    }
+
+    fn list_filter(&mut self, filter: &Filter) -> Result<(), CommandError> {
+        let max_tagwidth = self
+            .timelog
+            .iter()
+            .filter_map(|int| {
+                if filter.eval(int) {
+                    Some(self.timelog.tag_name(int.tag()).unwrap().len())
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
+
+        for int in self.timelog.iter().filter(filter.build_ref()) {
+            let tag = self.timelog.tag_name(int.tag()).unwrap();
+            writeln!(
+                self.outputs.output_mut(),
+                "{:<width$} | {}",
+                tag,
+                int.interval(),
+                width = max_tagwidth
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn purge(&mut self, info: &TagsInRange) -> Result<ChangeStatus, CommandError> {
+        let filter = info.filter(self.timelog)?;
+        let filter_fn = filter.build();
+
+        if self.timelog.iter().any(&filter_fn) {
+            if filter.evals_true() {
+                writeln!(self.outputs.error_mut(), "Purging ALL INTERVALS!")?;
+            } else {
+                writeln!(self.outputs.error_mut(), "Purging the following intervals:")?;
+                self.list_filter(&filter)?;
+            }
+
+            if self.user_confirmation(false)? {
+                writeln!(self.outputs.error_mut(), "Purging.")?;
+                self.timelog.remove(&filter_fn);
+                self.timelog.gc_tag_names();
+                Ok(ChangeStatus::Changed)
+            } else {
+                writeln!(self.outputs.error_mut(), "Purge cancelled.")?;
+                Ok(ChangeStatus::Unchanged)
+            }
+        } else {
+            writeln!(
+                self.outputs.error_mut(),
+                "No intervals match filter criteria; purge cancelled."
+            )?;
+            Ok(ChangeStatus::Unchanged)
+        }
+    }
+
+    fn aggregate(&mut self, info: &TagsInRange) -> Result<ChangeStatus, CommandError> {
+        let filter = info.filter(self.timelog)?;
+
+        writeln!(
+            self.outputs.error_mut(),
+            "Aggregating the following intervals:"
+        )?;
+        self.list_filter(&filter)?;
+
+        let filter = filter.build_ref();
+
+        let total = self
+            .timelog
+            .iter()
+            .filter(filter)
+            .fold(Duration::seconds(0), |d, int| d + int.duration());
+
+        writeln!(
+            self.outputs.output_mut(),
+            "Total {}:{:02}",
+            total.num_hours(),
+            total.num_minutes() % 60
+        )?;
+
+        Ok(ChangeStatus::Unchanged)
+    }
+
+    fn status(&mut self, tags: &[String]) -> Result<ChangeStatus, CommandError> {
+        let filter = if tags.is_empty() {
+            filter::is_open()
+        } else {
+            let tags_filter = filter::or_all(
+                tags.iter()
+                    .map(|name| self.timelog.tag_id(&name))
+                    .filter(|t| t.is_some())
+                    .map(|t| filter::has_tag(t.unwrap())),
+            );
+
+            filter::is_open() & tags_filter
+        };
+
+        if self.timelog.iter().any(filter.build()) {
+            writeln!(self.outputs.error_mut(), "Currently open intervals:")?;
+            self.list_filter(&filter)?;
+        } else {
+            writeln!(
+                self.outputs.error_mut(),
+                "No currently open intervals matching these filter criteria."
+            )?;
+        }
+
+        Ok(ChangeStatus::Unchanged)
+    }
+
+    fn tags(&mut self) -> Result<ChangeStatus, CommandError> {
+        let tagnames: BTreeSet<_> = self
+            .timelog
+            .iter()
+            .map(|int| String::from(self.timelog.tag_name(int.tag()).unwrap()))
+            .collect();
+
+        for name in tagnames {
+            writeln!(self.outputs.output_mut(), "{}", name)?;
+        }
+
+        Ok(ChangeStatus::Unchanged)
+    }
+
+    fn user_confirmation(&mut self, default: bool) -> Result<bool, CommandError> {
+        let options = if default { "(Y/n)" } else { "(y/N)" };
+
+        let mut line = String::new();
+        let mut result = default;
+
+        loop {
+            write!(self.outputs.error_mut(), "Okay? {} ", options)?;
+            self.outputs.error_mut().flush()?;
+            io::stdin().read_line(&mut line).unwrap();
+
+            let line_chars: Vec<_> = line.chars().collect();
+
+            if line.len() < 2 {
+                break;
+            } else if line_chars.len() == 2 {
+                match line_chars[0] {
+                    'y' | 'Y' => {
+                        result = true;
+                        break;
+                    }
+
+                    'n' | 'N' => {
+                        result = false;
+                        break;
+                    }
+
+                    _ => {
+                        line.clear();
+                        continue;
+                    }
+                }
+            } else {
+                let upper = line.to_uppercase();
+                match upper.as_ref() {
+                    "YES\n" => {
+                        result = true;
+                        break;
+                    }
+
+                    "NO\n" => {
+                        result = false;
+                        break;
+                    }
+
+                    _ => {
+                        line.clear();
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
 #[derive(Debug, Clone, StructOpt)]
 pub struct TagsInRange {
     /// Select only intervals that started before this time.
@@ -159,215 +443,54 @@ impl TagsInRange {
     }
 }
 
-impl Command {
-    pub fn execute(&self, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
-        match self {
-            Command::Open { tag, create } => open(
-                &tag.as_ref().cloned().unwrap_or_else(|| "default".into()),
-                *create,
-                timelog,
-            ),
-            Command::Close { tag } => close(
-                &tag.as_ref().cloned().unwrap_or_else(|| "default".into()),
-                timelog,
-            ),
-            Command::List { info } => {
-                info.log_debug();
-                list(info, timelog)
-            }
-            Command::Purge { info } => {
-                info.log_debug();
-                purge(info, timelog)
-            }
-            Command::Aggregate { info } => {
-                info.log_debug();
-                aggregate(info, timelog)
-            }
-            Command::Status { tags } => status(tags.as_ref(), timelog),
-
-            Command::Tags => tags(timelog),
-        }
-    }
-}
-
-fn open(tag: &str, create: bool, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
-    if timelog.tag_id(tag).is_none() && tag != "default" && !create {
-        eprintln!("Creating new tag '{}'.", tag);
-        if !user_confirmation(false) {
-            eprintln!("Cancelling open");
-            return Ok(ChangeStatus::Unchanged);
-        }
-    }
-
-    match timelog.open(tag) {
-        Ok(int) => {
-            let start = Local.from_utc_datetime(&int.start().naive_utc());
-            eprintln!(
-                "Opened new interval for tag '{}' at {}",
-                tag,
-                start.format(interval::FMT_STR)
-            );
-            Ok(ChangeStatus::Changed)
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
-fn close(tag: &str, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
-    match timelog.close(tag) {
-        Ok(int) => {
-            eprintln!("Closed interval for tag '{}': {}", tag, int.interval());
-            Ok(ChangeStatus::Changed)
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
-fn list(info: &TagsInRange, timelog: &TimeLog) -> Result<ChangeStatus, CommandError> {
-    let filter = info.filter(timelog)?;
-    list_filter(&filter, timelog);
-    Ok(ChangeStatus::Unchanged)
-}
-
-fn list_filter(filter: &Filter, timelog: &TimeLog) {
-    for int in timelog.iter().filter(filter.build_ref()) {
-        let tag = timelog.tag_name(int.tag()).unwrap();
-        println!("{}: {}", tag, int.interval());
-    }
-}
-
-fn purge(info: &TagsInRange, timelog: &mut TimeLog) -> Result<ChangeStatus, CommandError> {
-    let filter = info.filter(timelog)?;
-    let filter_fn = filter.build();
-
-    if timelog.iter().any(&filter_fn) {
-        if filter.evals_true() {
-            eprintln!("Purging ALL INTERVALS!");
-        } else {
-            eprintln!("Purging the following intervals:");
-            list_filter(&filter, timelog);
-        }
-
-        if user_confirmation(false) {
-            eprintln!("Purging.");
-            timelog.remove(&filter_fn);
-            timelog.gc_tag_names();
-            Ok(ChangeStatus::Changed)
-        } else {
-            eprintln!("Purge cancelled.");
-            Ok(ChangeStatus::Unchanged)
-        }
-    } else {
-        eprintln!("No intervals match filter criteria; purge cancelled.");
-        Ok(ChangeStatus::Unchanged)
-    }
-}
-
-fn aggregate(info: &TagsInRange, timelog: &TimeLog) -> Result<ChangeStatus, CommandError> {
-    let filter = info.filter(timelog)?;
-
-    eprintln!("Aggregating the following intervals:");
-    list_filter(&filter, timelog);
-
-    let filter = filter.build_ref();
-
-    let total = timelog
-        .iter()
-        .filter(filter)
-        .fold(Duration::seconds(0), |d, int| d + int.duration());
-
-    println!(
-        "Total {}:{:02}",
-        total.num_hours(),
-        total.num_minutes() % 60
-    );
-
-    Ok(ChangeStatus::Unchanged)
-}
-
-fn status(tags: &[String], timelog: &TimeLog) -> Result<ChangeStatus, CommandError> {
-    let filter = if tags.is_empty() {
-        filter::is_open()
-    } else {
-        let tags_filter = filter::or_all(
-            tags.iter()
-                .map(|name| timelog.tag_id(&name))
-                .filter(|t| t.is_some())
-                .map(|t| filter::has_tag(t.unwrap())),
-        );
-
-        filter::is_open() & tags_filter
-    };
-
-    if timelog.iter().any(filter.build()) {
-        eprintln!("Currently open intervals:");
-        list_filter(&filter, timelog);
-    } else {
-        eprintln!("No currently open intervals matching these filter criteria.");
-    }
-
-    Ok(ChangeStatus::Unchanged)
-}
-
-fn tags(timelog: &TimeLog) -> Result<ChangeStatus, CommandError> {
-    let tagnames: BTreeSet<_> = timelog
-        .iter()
-        .map(|int| timelog.tag_name(int.tag()).unwrap())
-        .collect();
-
-    for name in tagnames {
-        println!("{}", name);
-    }
-
-    Ok(ChangeStatus::Unchanged)
-}
-
-fn user_confirmation(default: bool) -> bool {
-    let options = if default { "(Y/n)" } else { "(y/N)" };
-
-    let mut line = String::new();
-    let mut result = default;
-
-    loop {
-        eprint!("Okay? {} ", options);
-        io::stderr().flush().unwrap();
-        io::stdin().read_line(&mut line).unwrap();
-
-        let line_chars: Vec<_> = line.chars().collect();
-
-        if line.len() < 2 {
-            break;
-        } else if line_chars.len() == 2 {
-            match line_chars[0] {
-                'y' | 'Y' => {
-                    result = true;
-                    break;
-                }
-
-                'n' | 'N' => {
-                    result = false;
-                    break;
-                }
-
-                _ => {
-                    line.clear();
-                    continue;
-                }
-            }
-        } else {
-            line.clear();
-            continue;
-        }
-    }
-
-    result
-}
-
 #[derive(Debug, Clone)]
+pub struct Outputs<W> {
+    pub output: W,
+    pub error: Option<W>,
+}
+
+impl<W> Outputs<W>
+where
+    W: Write,
+{
+    pub fn new(output: W, error: Option<W>) -> Outputs<W> {
+        Outputs { output, error }
+    }
+
+    pub fn output(&self) -> &W {
+        &self.output
+    }
+
+    pub fn output_mut(&mut self) -> &mut W {
+        &mut self.output
+    }
+
+    pub fn error(&self) -> &W {
+        self.error.as_ref().unwrap_or(&self.output)
+    }
+
+    pub fn error_mut(&mut self) -> &mut W {
+        self.error.as_mut().unwrap_or(&mut self.output)
+    }
+}
+
+pub type StdOutputs = Outputs<Box<dyn Write>>;
+
+impl Default for StdOutputs {
+    fn default() -> StdOutputs {
+        Outputs {
+            output: Box::new(io::stdout()),
+            error: Some(Box::new(io::stderr())),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum CommandError {
     TimeLogError(TimeLogError),
     TimeParseError,
     InconsistentFilter,
+    IoError(io::Error),
 }
 
 impl Display for CommandError {
@@ -376,6 +499,7 @@ impl Display for CommandError {
             CommandError::TimeLogError(err) => Display::fmt(err, f),
             CommandError::TimeParseError => write!(f, "error parsing time specification"),
             CommandError::InconsistentFilter => write!(f, "inconsistent filters specified"),
+            CommandError::IoError(err) => write!(f, "{}", err),
         }
     }
 }
@@ -385,6 +509,12 @@ impl Error for CommandError {}
 impl From<TimeLogError> for CommandError {
     fn from(err: TimeLogError) -> CommandError {
         CommandError::TimeLogError(err)
+    }
+}
+
+impl From<io::Error> for CommandError {
+    fn from(err: io::Error) -> CommandError {
+        CommandError::IoError(err)
     }
 }
 
