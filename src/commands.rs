@@ -562,20 +562,17 @@ fn datetime_from_str(s: &str) -> Result<DateTime<Utc>, CommandError> {
         }
     }
 
-    match s.chars().next() {
-        Some(c) if c == '+' || c == '-' => {
-            let s = &s[1..];
-            let dur = duration_from_str(s)?;
-            if c == '+' {
-                return Ok(Utc::now() + dur);
-            } else {
-                return Ok(Utc::now() - dur);
-            }
+    if let Some(c @ ('+' | '-')) = s.chars().next() {
+        let s = &s[1..];
+        let dur = duration_from_str(s)?;
+        if c == '+' {
+            Ok(Utc::now() + dur)
+        } else {
+            Ok(Utc::now() - dur)
         }
-        _ => (),
+    } else {
+        Err(CommandError::TimeParseError)
     }
-
-    Err(CommandError::TimeParseError)
 }
 
 fn duration_from_str(s: &str) -> Result<Duration, CommandError> {
