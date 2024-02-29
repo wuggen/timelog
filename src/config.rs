@@ -14,6 +14,29 @@ use std::fmt::{self, Display, Formatter};
 
 use ConfigError::*;
 
+#[cfg(debug_assertions)]
+mod internal {
+    use std::path::PathBuf;
+
+    pub const LOGFILE_VAR: &'static str = "TIMELOG_DBG_LOGFILE";
+
+    pub fn default_logfile() -> Option<PathBuf> {
+        Some("./timelog".into())
+    }
+}
+
+#[cfg(not(debug_assertions))]
+mod internal {
+    pub const LOGFILE_VAR: &'static str = "TIMELOG_LOGFILE";
+
+    pub fn default_logfile() -> Option<PathBuf> {
+        let home_dir = dirs::home_dir()?;
+        Some(home_dir.join(PathBuf::from(".timelog")))
+    }
+}
+
+use internal::*;
+
 /// Log time.
 ///
 /// The log file to read/write is selected as follows:
@@ -41,11 +64,8 @@ pub fn logfile_path(options: &Options) -> Result<PathBuf, ConfigError> {
     options
         .logfile
         .clone()
-        .or_else(|| env::var_os("TIMELOG_LOGFILE").map(<PathBuf as From<OsString>>::from))
-        .or_else(|| {
-            let home_dir = dirs::home_dir()?;
-            Some(home_dir.join(PathBuf::from(".timelog")))
-        })
+        .or_else(|| env::var_os(LOGFILE_VAR).map(<PathBuf as From<OsString>>::from))
+        .or_else(default_logfile)
         .ok_or(CannotFindLogFile)
 }
 
