@@ -259,7 +259,7 @@ where
         } else {
             let tags_filter = filter::or_all(
                 tags.iter()
-                    .map(|name| self.timelog.tag_id(&name))
+                    .map(|name| self.timelog.tag_id(name))
                     .filter(|t| t.is_some())
                     .map(|t| filter::has_tag(t.unwrap())),
             );
@@ -553,7 +553,7 @@ fn datetime_from_str(s: &str) -> Result<DateTime<Utc>, CommandError> {
         for date_fmt in DATE_FMTS {
             let mut fmt = String::from(*date_fmt);
             fmt.push(',');
-            fmt.push_str(*time_fmt);
+            fmt.push_str(time_fmt);
             if let Ok(datetime) = NaiveDateTime::parse_from_str(&s, &fmt) {
                 return Ok(Utc
                     .from_local_datetime(&(datetime - now.offset().fix()))
@@ -562,7 +562,7 @@ fn datetime_from_str(s: &str) -> Result<DateTime<Utc>, CommandError> {
         }
     }
 
-    match s.chars().nth(0) {
+    match s.chars().next() {
         Some(c) if c == '+' || c == '-' => {
             let s = &s[1..];
             let dur = duration_from_str(s)?;
@@ -583,21 +583,21 @@ fn duration_from_str(s: &str) -> Result<Duration, CommandError> {
 
     let (hours, minutes, seconds) = if tokens.len() == 1 {
         (
-            u64::from_str_radix(tokens[0], 10).map_err(|_| CommandError::TimeParseError)?,
+            tokens[0].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
             0,
             0,
         )
     } else if tokens.len() == 2 {
         (
-            u64::from_str_radix(tokens[0], 10).map_err(|_| CommandError::TimeParseError)?,
-            u64::from_str_radix(tokens[1], 10).map_err(|_| CommandError::TimeParseError)?,
+            tokens[0].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
+            tokens[1].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
             0,
         )
     } else if tokens.len() == 3 {
         (
-            u64::from_str_radix(tokens[0], 10).map_err(|_| CommandError::TimeParseError)?,
-            u64::from_str_radix(tokens[1], 10).map_err(|_| CommandError::TimeParseError)?,
-            u64::from_str_radix(tokens[2], 10).map_err(|_| CommandError::TimeParseError)?,
+            tokens[0].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
+            tokens[1].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
+            tokens[2].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
         )
     } else {
         return Err(CommandError::TimeParseError);
