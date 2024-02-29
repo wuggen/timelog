@@ -583,21 +583,33 @@ fn duration_from_str(s: &str) -> Result<Duration, CommandError> {
 
     let (hours, minutes, seconds) = if tokens.len() == 1 {
         (
-            tokens[0].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
+            tokens[0]
+                .parse::<u64>()
+                .map_err(|_| CommandError::TimeParseError)?,
             0,
             0,
         )
     } else if tokens.len() == 2 {
         (
-            tokens[0].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
-            tokens[1].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
+            tokens[0]
+                .parse::<u64>()
+                .map_err(|_| CommandError::TimeParseError)?,
+            tokens[1]
+                .parse::<u64>()
+                .map_err(|_| CommandError::TimeParseError)?,
             0,
         )
     } else if tokens.len() == 3 {
         (
-            tokens[0].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
-            tokens[1].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
-            tokens[2].parse::<u64>().map_err(|_| CommandError::TimeParseError)?,
+            tokens[0]
+                .parse::<u64>()
+                .map_err(|_| CommandError::TimeParseError)?,
+            tokens[1]
+                .parse::<u64>()
+                .map_err(|_| CommandError::TimeParseError)?,
+            tokens[2]
+                .parse::<u64>()
+                .map_err(|_| CommandError::TimeParseError)?,
         )
     } else {
         return Err(CommandError::TimeParseError);

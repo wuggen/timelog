@@ -1,11 +1,11 @@
-use timelog::config::{self, Options, ConfigError};
 use timelog::commands::{CommandError, StdOutputs};
+use timelog::config::{self, ConfigError, Options};
 
 use structopt::StructOpt;
 
 use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 use std::process;
-use std::fmt::{self, Formatter, Display};
 
 fn main() {
     if let Err(err) = run() {
@@ -17,10 +17,7 @@ fn main() {
 fn run() -> Result<(), MainError> {
     let options = Options::from_args();
 
-    stderrlog::new()
-        .verbosity(options.verbose)
-        .init()
-        .unwrap();
+    stderrlog::new().verbosity(options.verbose).init().unwrap();
 
     let mut timelog = config::current_timelog(&options)?;
     let outputs = StdOutputs::default();

@@ -41,14 +41,14 @@ impl TimeLog {
 
     pub fn remove<F>(&mut self, mut filter: F)
     where
-        F: FnMut(&TaggedInterval) -> bool
+        F: FnMut(&TaggedInterval) -> bool,
     {
         self.retain(|int| !filter(int));
     }
 
     pub fn retain<F>(&mut self, filter: F)
     where
-        F: FnMut(&TaggedInterval) -> bool
+        F: FnMut(&TaggedInterval) -> bool,
     {
         self.intervals = self.iter().cloned().filter(filter).collect();
     }
