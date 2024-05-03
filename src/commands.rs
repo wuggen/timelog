@@ -427,18 +427,18 @@ impl TagsInRange {
         }?;
 
         let res = tags_filter & before_filter & after_filter & open_closed_filter;
-        debug!("TagsInRange filter: {:?}", res);
+        log::debug!("TagsInRange filter: {:?}", res);
 
         Ok(res)
     }
 
     fn log_debug(&self) {
         if let Some(before) = self.before {
-            debug!("Before time: {}", before);
+            log::debug!("Before time: {}", before);
         }
 
         if let Some(after) = self.after {
-            debug!("After time: {}", after);
+            log::debug!("After time: {}", after);
         }
     }
 }

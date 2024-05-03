@@ -1,6 +1,7 @@
 use crate::tags::TagId;
 
 use chrono::{DateTime, Duration, Local, TimeZone, Timelike, Utc};
+use serde::{Deserialize, Serialize};
 
 use std::ops::Add;
 use std::time::Duration as StdDuration;

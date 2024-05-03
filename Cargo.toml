@@ -2,7 +2,7 @@
 name = "timelog"
 version = "0.4.2"
 authors = ["John Andrews <theunderdog09@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

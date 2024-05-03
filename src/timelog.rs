@@ -3,6 +3,7 @@ use crate::interval::{self, Interval, TaggedInterval};
 use crate::tags::{TagId, Tags};
 
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
