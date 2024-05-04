@@ -1,3 +1,5 @@
+//! Configuration definitions and command-line arguments.
+
 use crate::commands::Command;
 use crate::timelog::TimeLog;
 
@@ -60,36 +62,46 @@ pub struct Options {
     pub command: Command,
 }
 
-pub fn logfile_path(options: &Options) -> Result<PathBuf, ConfigError> {
-    options
-        .logfile
-        .clone()
-        .or_else(|| env::var_os(LOGFILE_VAR).map(<PathBuf as From<OsString>>::from))
-        .or_else(default_logfile)
-        .ok_or(CannotFindLogFile)
-}
+impl Options {
+    /// Get the path to the logfile according to this set of options.
+    pub fn logfile_path(&self) -> Result<PathBuf, ConfigError> {
+        self.logfile
+            .clone()
+            .or_else(|| env::var_os(LOGFILE_VAR).map(<PathBuf as From<OsString>>::from))
+            .or_else(default_logfile)
+            .ok_or(CannotFindLogFile)
+    }
 
-pub fn current_timelog(options: &Options) -> Result<TimeLog, ConfigError> {
-    let path = logfile_path(options)?;
-    match File::open(path) {
-        Ok(file) => Ok(serde_json::from_reader(file)?),
-        Err(err) => match err.kind() {
-            io::ErrorKind::NotFound => Ok(TimeLog::new()),
-            _ => Err(err.into()),
-        },
+    /// Load the current timelog from the logfile.
+    pub fn current_timelog(&self) -> Result<TimeLog, ConfigError> {
+        let path = self.logfile_path()?;
+        match File::open(path) {
+            Ok(file) => Ok(serde_json::from_reader(file)?),
+            Err(err) => match err.kind() {
+                io::ErrorKind::NotFound => Ok(TimeLog::new()),
+                _ => Err(err.into()),
+            },
+        }
+    }
+
+    /// Write the given timelog to the logfile.
+    pub fn write_timelog(&self, timelog: &TimeLog) -> Result<(), ConfigError> {
+        let path = self.logfile_path()?;
+        let file = File::create(path)?;
+        Ok(serde_json::to_writer(file, timelog)?)
     }
 }
 
-pub fn write_timelog(options: &Options, timelog: &TimeLog) -> Result<(), ConfigError> {
-    let path = logfile_path(options)?;
-    let file = File::create(path)?;
-    Ok(serde_json::to_writer(file, timelog)?)
-}
-
+/// Configuration and logfile loading errors.
 #[derive(Debug)]
 pub enum ConfigError {
+    /// Error deserializing the JSON logfile.
     SerdeJson(serde_json::Error),
+
+    /// The logfile cannot be found.
     CannotFindLogFile,
+
+    /// The logfile cannot be opened.
     CannotOpenLogFile(io::Error),
 }
 

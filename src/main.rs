@@ -1,5 +1,5 @@
 use timelog::commands::{CommandError, StdOutputs};
-use timelog::config::{self, ConfigError, Options};
+use timelog::config::{ConfigError, Options};
 
 use structopt::StructOpt;
 
@@ -19,10 +19,10 @@ fn run() -> Result<(), MainError> {
 
     stderrlog::new().verbosity(options.verbose).init().unwrap();
 
-    let mut timelog = config::current_timelog(&options)?;
+    let mut timelog = options.current_timelog()?;
     let outputs = StdOutputs::default();
     if options.command.execute(&mut timelog, outputs)?.is_changed() {
-        config::write_timelog(&options, &timelog)?;
+        options.write_timelog(&timelog)?;
     }
     Ok(())
 }

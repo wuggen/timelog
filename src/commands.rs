@@ -1,3 +1,5 @@
+//! CLI command implementations.
+
 use crate::filter::{self, Filter};
 use crate::interval;
 use crate::timelog::{TimeLog, TimeLogError};
@@ -12,6 +14,7 @@ use std::io::{self, Write};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
+/// Did the timelog change as a result of a command?
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub enum ChangeStatus {
     Changed,
@@ -68,6 +71,9 @@ pub enum Command {
 }
 
 impl Command {
+    /// Execute this command with the given timelog and output streams.
+    ///
+    /// On success, returns whether the timelog was changed as a result of this command.
     pub fn execute<W>(
         &self,
         timelog: &mut TimeLog,
@@ -351,6 +357,7 @@ where
     }
 }
 
+/// Command-line specification of an interval filter.
 #[derive(Debug, Clone, StructOpt)]
 pub struct TagsInRange {
     /// Select only intervals that started before this time.
@@ -378,6 +385,7 @@ pub struct TagsInRange {
 }
 
 impl TagsInRange {
+    /// Construct a filter matching this `TagsInRange`.
     pub fn filter(&self, timelog: &TimeLog) -> Result<Filter, CommandError> {
         let tags_filter = if self.tags.is_empty() {
             filter::filter_true()
