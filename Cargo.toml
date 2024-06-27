@@ -14,3 +14,4 @@ chrono = { version = "0.4.38", features = ["serde"] }
 dirs = "2.0"
 log = "0.4.21"
 stderrlog = "0.4.3"
+thiserror = "1.0.61"
