@@ -1,5 +1,5 @@
 use std::fmt::{self, Display, Formatter};
-use std::ops::Add;
+use std::ops::{Add, Sub};
 use std::time::Duration;
 
 use chrono::{prelude::*, TimeDelta};
@@ -14,17 +14,17 @@ pub struct Interval {
 
 impl Interval {
     /// Create a new interval with the given start time and duration.
-    pub fn new(start: RestrictedDateTime, duration: RestrictedDuration) -> Self {
+    pub const fn new(start: RestrictedDateTime, duration: RestrictedDuration) -> Self {
         Self { start, duration }
     }
 
     /// Get the start time of this interval.
-    pub fn start_time(&self) -> RestrictedDateTime {
+    pub const fn start_time(&self) -> RestrictedDateTime {
         self.start
     }
 
     /// Get the duration of this interval.
-    pub fn duration(&self) -> RestrictedDuration {
+    pub const fn duration(&self) -> RestrictedDuration {
         self.duration
     }
 
@@ -49,7 +49,7 @@ impl Display for RestrictedDuration {
 
 impl RestrictedDuration {
     /// Create a new `RestrictedDuration`.
-    pub fn new(hours: u32, quarter_hour: QuarterHour) -> Self {
+    pub const fn new(hours: u32, quarter_hour: QuarterHour) -> Self {
         Self {
             hours,
             quarter_hour,
@@ -57,7 +57,7 @@ impl RestrictedDuration {
     }
 
     /// Create a new `RestrictedDuration` from a total number of minutes.
-    pub fn from_minutes(minutes: u32) -> Self {
+    pub const fn from_minutes(minutes: u32) -> Self {
         let hours = minutes / 60;
         let quarter_hour = QuarterHour::from_minutes(minutes);
         Self {
@@ -67,24 +67,24 @@ impl RestrictedDuration {
     }
 
     /// Get the whole hours of this duration.
-    pub fn hours(&self) -> u32 {
+    pub const fn hours(&self) -> u32 {
         self.hours
     }
 
     /// Get the total number of minutes of this duration.
-    pub fn minutes(&self) -> u32 {
+    pub const fn minutes(&self) -> u32 {
         self.hours() * 60 + self.quarter_hour.minute()
     }
 
     /// Get the quarter hour of this duration.
-    pub fn quarter_hour(&self) -> QuarterHour {
+    pub const fn quarter_hour(&self) -> QuarterHour {
         self.quarter_hour
     }
 
     /// Increment this duration to the next quarter hour.
-    pub fn increment(&self) -> Self {
+    pub const fn increment(&self) -> Self {
         let quarter_hour = self.quarter_hour.increment();
-        let hours = if quarter_hour == QuarterHour::Q0 {
+        let hours = if matches!(quarter_hour, QuarterHour::Q0) {
             self.hours + 1
         } else {
             self.hours
@@ -97,36 +97,56 @@ impl RestrictedDuration {
     }
 
     /// Get the quarter-hour floor of the given duration.
-    pub fn floor_duration(duration: Duration) -> Self {
-        Self::from(duration)
-    }
-
-    /// Get the quarter-hour ceiling of the given duration.
-    pub fn ceil_duration(duration: Duration) -> Self {
-        Self::from(duration + Duration::from_secs(14 * 60))
-    }
-
-    /// Get the quarter-hour floor of the given time delta.
-    pub fn try_floor_delta(delta: TimeDelta) -> Result<Self, NegativeDeltaError> {
-        Self::try_from(delta)
-    }
-
-    /// Get the quarter-hour ceiling of the given time delta.
-    pub fn try_ceil_delta(delta: TimeDelta) -> Result<Self, NegativeDeltaError> {
-        Self::try_from(delta + TimeDelta::try_minutes(14).unwrap())
-    }
-}
-
-impl From<Duration> for RestrictedDuration {
-    /// Returns the quarter-hour floor of the given duration.
-    fn from(value: Duration) -> Self {
-        let minutes = (value.as_secs() / 60) as u32;
+    pub const fn floor_duration(duration: Duration) -> Self {
+        let minutes = (duration.as_secs() / 60) as u32;
         let hours = minutes / 60;
         let quarter_hour = QuarterHour::from_minutes(minutes);
         Self {
             hours,
             quarter_hour,
         }
+    }
+
+    /// Get the quarter-hour ceiling of the given duration.
+    pub const fn ceil_duration(duration: Duration) -> Self {
+        if let Some(dur) = duration.checked_add(Duration::from_secs(14 * 60)) {
+            Self::floor_duration(dur)
+        } else {
+            panic!("overflow")
+        }
+    }
+
+    /// Get the quarter-hour floor of the given time delta.
+    ///
+    /// Returns `None` if the given delta is negative.
+    pub const fn try_floor_delta(delta: TimeDelta) -> Option<Self> {
+        if delta.num_milliseconds() < 0 {
+            None
+        } else {
+            let hours = delta.num_hours() as u32;
+            let quarter_hour = QuarterHour::from_minutes(delta.num_minutes() as u32);
+            Some(Self {
+                hours,
+                quarter_hour,
+            })
+        }
+    }
+
+    /// Get the quarter-hour ceiling of the given time delta.
+    pub const fn try_ceil_delta(delta: TimeDelta) -> Option<Self> {
+        const FOURTEEN: TimeDelta = TimeDelta::minutes(14);
+        let delta = match delta.checked_add(&FOURTEEN) {
+            Some(d) => d,
+            None => return None,
+        };
+        Self::try_floor_delta(delta)
+    }
+}
+
+impl From<Duration> for RestrictedDuration {
+    /// Returns the quarter-hour floor of the given duration.
+    fn from(value: Duration) -> Self {
+        Self::floor_duration(value)
     }
 }
 
@@ -249,7 +269,7 @@ impl RestrictedTime {
     /// Create a new `RestrictedTime`.
     ///
     /// Returns `None` if the given hour is 24 or greater.
-    pub fn new(hour: u32, quarter_hour: QuarterHour) -> Option<Self> {
+    pub const fn new(hour: u32, quarter_hour: QuarterHour) -> Option<Self> {
         if hour < 24 {
             Some(Self { hour, quarter_hour })
         } else {
@@ -258,16 +278,16 @@ impl RestrictedTime {
     }
 
     /// Get the quarter hour of this `RestrictedTime`.
-    pub fn quarter_hour(&self) -> QuarterHour {
+    pub const fn quarter_hour(&self) -> QuarterHour {
         self.quarter_hour
     }
 
     /// Increment this `RestrictedTime` to the next quarter hour.
     ///
     /// This method wraps to zero if the resulting hour would be 24 or greater.
-    pub fn increment(&self) -> Self {
+    pub const fn increment(&self) -> Self {
         let quarter_hour = self.quarter_hour.increment();
-        let hour = if quarter_hour == QuarterHour::Q0 {
+        let hour = if matches!(quarter_hour, QuarterHour::Q0) {
             (self.hour + 1) % 24
         } else {
             self.hour
@@ -296,18 +316,32 @@ impl RestrictedTime {
         let now = Utc::now().naive_utc().time();
         Self::ceil_naive(now)
     }
-}
 
-impl Add<RestrictedDuration> for RestrictedTime {
-    type Output = Self;
-
-    fn add(self, rhs: RestrictedDuration) -> Self::Output {
+    /// Add the given duration to this `RestrictedTime`.
+    pub const fn overflowing_add(self, rhs: RestrictedDuration) -> Self {
         let self_minutes = self.hour * 60 + self.quarter_hour.minute();
         let rhs_minutes = rhs.minutes();
         let total_minutes = self_minutes + rhs_minutes;
         let hour = (total_minutes / 60) % 24;
         let quarter_hour = QuarterHour::from_minutes(total_minutes);
         Self { hour, quarter_hour }
+    }
+}
+
+impl Add<RestrictedDuration> for RestrictedTime {
+    type Output = Self;
+
+    fn add(self, rhs: RestrictedDuration) -> Self::Output {
+        self.overflowing_add(rhs)
+    }
+}
+
+impl Sub for RestrictedTime {
+    type Output = RestrictedDuration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        RestrictedDuration::try_from(NaiveTime::from(self) - NaiveTime::from(rhs))
+            .expect("negative duration")
     }
 }
 
@@ -336,12 +370,12 @@ pub struct RestrictedDateTime {
 
 impl RestrictedDateTime {
     /// Get the date of this `RestrictedDateTime`.
-    pub fn date(&self) -> NaiveDate {
+    pub const fn date(&self) -> NaiveDate {
         self.date
     }
 
     /// Get the time of this `RestrictedDateTime`.
-    pub fn time(&self) -> RestrictedTime {
+    pub const fn time(&self) -> RestrictedTime {
         self.time
     }
 
@@ -468,6 +502,15 @@ impl Add<RestrictedDuration> for RestrictedDateTime {
     }
 }
 
+impl Sub for RestrictedDateTime {
+    type Output = RestrictedDuration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        RestrictedDuration::try_from(NaiveDateTime::from(self) - NaiveDateTime::from(rhs))
+            .expect("negative duration")
+    }
+}
+
 /// A 15-minute division of an hour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum QuarterHour {
@@ -486,7 +529,7 @@ impl QuarterHour {
     ///
     /// This method operates modularly; that is, it will take the quarter hour of the given number
     /// of minutes modulo 60.
-    pub fn from_minutes(minutes: u32) -> Self {
+    pub const fn from_minutes(minutes: u32) -> Self {
         Self::from_int(minutes / 15)
     }
 
@@ -530,7 +573,7 @@ impl QuarterHour {
     /// assert_eq!(QuarterHour::Q30.increment(), QuarterHour::Q45);
     /// assert_eq!(QuarterHour::Q45.increment(), QuarterHour::Q0);
     /// ```
-    pub fn increment(self) -> Self {
+    pub const fn increment(self) -> Self {
         Self::from_int(self.as_int() + 1)
     }
 
@@ -542,7 +585,7 @@ impl QuarterHour {
     /// assert_eq!(QuarterHour::Q30.minute(), 30);
     /// assert_eq!(QuarterHour::Q45.minute(), 45);
     /// ```
-    pub fn minute(self) -> u32 {
+    pub const fn minute(self) -> u32 {
         self.as_int() * 15
     }
 
@@ -550,7 +593,7 @@ impl QuarterHour {
     ///
     /// The argument is taken modulo 4; 0 goes to `Q0`, 1 goes to `Q15`, 2 goes to `Q30`, and 3
     /// goes to `Q45`.
-    fn from_int(n: u32) -> Self {
+    const fn from_int(n: u32) -> Self {
         match n % 4 {
             0 => Self::Q0,
             1 => Self::Q15,
@@ -561,7 +604,7 @@ impl QuarterHour {
     }
 
     /// Get the zero-indexed ordinal position of this `QuarterHour` within the hour.
-    fn as_int(self) -> u32 {
+    const fn as_int(self) -> u32 {
         match self {
             QuarterHour::Q0 => 0,
             QuarterHour::Q15 => 1,
